@@ -1,0 +1,182 @@
+#include <DHT.h>
+#include <Wire.h>
+#include <RTClib.h> // Librería para DS3231
+#include <RF24.h>
+#include <RF24Network.h>
+#include <RF24Mesh.h>
+#include <esp_sleep.h>
+
+// Pines configurados para el NRF24L01
+#define CE_PIN 5
+#define CSN_PIN 17
+
+// Pines configurados para sensores
+#define DHT_PIN 4
+#define TEMT6000_PIN 34
+#define RAIN_PIN 35
+#define DHTTYPE DHT11
+
+// Pin para la señal INT/SQW del DS3231
+#define DS3231_INT_PIN GPIO_NUM_25
+
+RF24 radio(CE_PIN, CSN_PIN);
+RF24Network network(radio);
+RF24Mesh mesh(radio, network);
+RTC_DS3231 rtc; // Instancia para el módulo DS3231
+DHT dht(DHT_PIN, DHTTYPE);
+
+bool sincronizado = false; // Bandera para verificar si la hora está sincronizada
+
+void setup() {
+    Serial.begin(115200);
+
+    // Inicializar sensores
+    dht.begin();
+
+    // Inicializar DS3231
+    if (!rtc.begin()) {
+        Serial.println("[ERROR] No se pudo inicializar el módulo DS3231.");
+        while (1);
+    }
+
+    // Inicializar RF24Mesh
+    if (!mesh.begin()) {
+        Serial.println("[ERROR] No se pudo inicializar RF24Mesh.");
+        while (1);
+    }
+
+    radio.setPALevel(RF24_PA_HIGH);
+    Serial.println("[INFO] Nodo repetidor inicializado.");
+
+    // Verificar la causa del despertar
+    esp_sleep_wakeup_cause_t causaDespertar = esp_sleep_get_wakeup_cause();
+    if (causaDespertar == ESP_SLEEP_WAKEUP_UNDEFINED) {
+        // Reinicio completo: solicitar la hora
+        Serial.println("[INFO] Reinicio completo detectado. Solicitando hora...");
+        solicitarHora();
+        if (!sincronizado) {
+            Serial.println("[WARNING] No se pudo sincronizar la hora.");
+        } else {
+            Serial.println("[INFO] Hora sincronizada correctamente.");
+        }
+    } else {
+        // Despertar de Deep Sleep: usar hora almacenada en DS3231
+        Serial.println("[INFO] Despertar de Deep Sleep. Usando hora del DS3231.");
+        sincronizado = true;
+    }
+
+    // Enviar datos y configurar alarma para despertar en 5 minutos
+    enviarDatos();
+    configurarAlarmaDespertar(5);
+    entrarEnDeepSleep();
+}
+
+void loop() {
+    // No se utiliza el loop; todo el flujo ocurre en el setup.
+}
+
+void sincronizarHora(String mensaje) {
+    String hora = mensaje.substring(5); // Extraer la hora después de "HORA:"
+    hora.trim();
+
+    Serial.print("[INFO] Hora recibida y sincronizada: ");
+    Serial.println(hora);
+
+    // Parsear y guardar la hora en el DS3231
+    int year = hora.substring(0, 4).toInt();
+    int month = hora.substring(5, 7).toInt();
+    int day = hora.substring(8, 10).toInt();
+    int hour = hora.substring(11, 13).toInt();
+    int minute = hora.substring(14, 16).toInt();
+    int second = hora.substring(17, 19).toInt();
+
+    rtc.adjust(DateTime(year, month, day, hour, minute, second));
+    sincronizado = true;
+}
+
+void solicitarHora() {
+    char buffer[32];
+    String mensaje = "SOLICITAR_HORA";
+    mensaje.toCharArray(buffer, sizeof(buffer));
+
+    if (mesh.write(&buffer, 'S', sizeof(buffer))) {
+        Serial.println("[INFO] Solicitud de hora enviada al maestro.");
+
+        // Esperar respuesta del maestro
+        unsigned long startTime = millis();
+        while (!sincronizado && millis() - startTime < 5000) {
+            if (network.available()) {
+                RF24NetworkHeader header;
+                char mensaje[32] = {0};
+                network.read(header, &mensaje, sizeof(mensaje));
+                String mensajeStr = String(mensaje);
+
+                if (mensajeStr.startsWith("HORA:")) {
+                    sincronizarHora(mensajeStr);
+                }
+            }
+        }
+    } else {
+        Serial.println("[ERROR] Fallo al enviar solicitud de hora.");
+    }
+}
+
+void enviarDatos() {
+    char buffer[32];
+
+    // Enviar mensaje de inicio
+    String inicio = "INICIO:NODO:" + String(mesh.getNodeID());
+    inicio.toCharArray(buffer, sizeof(buffer));
+    if (mesh.write(&buffer, 'D', sizeof(buffer))) {
+        Serial.println("[INFO] Mensaje de inicio enviado.");
+    } else {
+        Serial.println("[ERROR] Fallo al enviar el mensaje de inicio.");
+        return;
+    }
+
+    // Leer datos de sensores
+    float temperatura = dht.readTemperature();
+    float humedad = dht.readHumidity();
+    int luminosidad = analogRead(TEMT6000_PIN);
+    int lluvia = analogRead(RAIN_PIN);
+    DateTime now = rtc.now();
+
+    // Enviar datos
+    enviarDato("FECHA:" + String(now.year()) + "-" + String(now.month()) + "-" + String(now.day()));
+    enviarDato("HORA:" + String(now.hour()) + ":" + String(now.minute()));
+    enviarDato("TEMP:" + String(temperatura));
+    enviarDato("HUM:" + String(humedad));
+    enviarDato("LUM:" + String(luminosidad));
+    enviarDato("LLUVIA:" + String(lluvia));
+    enviarDato("FIN");
+}
+
+void enviarDato(String dato) {
+    char buffer[32];
+    dato.toCharArray(buffer, sizeof(buffer));
+    if (mesh.write(&buffer, 'D', sizeof(buffer))) {
+        Serial.print("[INFO] Dato enviado: ");
+        Serial.println(dato);
+    } else {
+        Serial.print("[ERROR] Fallo al enviar dato: ");
+        Serial.println(dato);
+    }
+}
+
+void configurarAlarmaDespertar(int minutos) {
+    DateTime now = rtc.now();
+    DateTime proximaAlarma = now + TimeSpan(0, 0, minutos, 0); // +5 minutos
+    rtc.setAlarm1(proximaAlarma, DS3231_A1_Minute);
+    rtc.clearAlarm(1); // Limpiar cualquier alarma previa
+
+    // Imprimir hora de alarma configurada
+    Serial.print("[INFO] Alarma configurada para: ");
+    Serial.println(proximaAlarma.timestamp(DateTime::TIMESTAMP_TIME));
+}
+
+void entrarEnDeepSleep() {
+    esp_sleep_enable_ext0_wakeup(DS3231_INT_PIN, 0); // Despertar con señal baja en INT/SQW
+    Serial.println("[INFO] Entrando en Deep Sleep...");
+    Serial.flush();
+    esp_deep_sleep_start();
+}
