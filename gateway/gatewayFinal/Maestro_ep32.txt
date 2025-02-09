@@ -1,0 +1,123 @@
+
+#include <RF24.h>
+#include <RF24Network.h>
+#include <RF24Mesh.h>
+
+// Pines configurados para el NRF24L01
+#define CE_PIN 5
+#define CSN_PIN 17
+
+// Pines configurados para la comunicación serial con la Raspberry Pi
+#define RXD2 25
+#define TXD2 26
+
+RF24 radio(CE_PIN, CSN_PIN);
+RF24Network network(radio);
+RF24Mesh mesh(radio, network);
+
+String bufferDatos = ""; // Buffer para reconstruir los datos del nodo
+bool esperandoInicio = true; // Indica si se espera el inicio de un paquete
+
+void setup() {
+    Serial.begin(115200); // Comunicación para depuración
+    Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2); // Comunicación con la Raspberry Pi
+
+    if (!mesh.begin()) {
+        Serial.println("[ERROR] No se pudo inicializar RF24Mesh.");
+        while (1);
+    }
+
+    radio.setPALevel(RF24_PA_HIGH);
+    Serial.println("[INFO] Maestro inicializado.");
+}
+
+void loop() {
+    mesh.update();
+
+    // Procesar mensajes de los nodos
+    while (network.available()) {
+        RF24NetworkHeader header;
+        char mensaje[32] = {0};
+        network.read(header, &mensaje, sizeof(mensaje));
+
+        String mensajeStr = String(mensaje);
+
+        if (mensajeStr == "SOLICITAR_HORA") {
+            reenviarHoraAlNodo(header.from_node);
+        } else if (mensajeStr.startsWith("INICIO")) {
+            // Reiniciar el buffer y marcar inicio del paquete
+            bufferDatos = mensajeStr + ",";
+            esperandoInicio = false;
+        } else if (mensajeStr.startsWith("FECHA") && !esperandoInicio) {
+            // Agregar datos al buffer
+            bufferDatos += mensajeStr + ",";
+        } else if (mensajeStr.startsWith("HORA") && !esperandoInicio) {
+            // Agregar datos al buffer
+            bufferDatos += mensajeStr + ",";
+        } else if (mensajeStr.startsWith("TEMP") && !esperandoInicio) {
+            // Agregar datos al buffer
+            bufferDatos += mensajeStr + ",";
+        } else if (mensajeStr.startsWith("HUM") && !esperandoInicio) {
+            // Agregar datos al buffer
+            bufferDatos += mensajeStr + ",";
+        } else if (mensajeStr.startsWith("LUM") && !esperandoInicio) {
+            // Agregar datos al buffer
+            bufferDatos += mensajeStr + ",";
+        } else if (mensajeStr.startsWith("LLUVIA") && !esperandoInicio) {
+            // Agregar datos al buffer
+            bufferDatos += mensajeStr + ",";
+        } else if (mensajeStr == "FIN" && !esperandoInicio) {
+            // Finalizar el paquete y enviarlo a la Raspberry Pi
+            bufferDatos += mensajeStr;
+            enviarDatosARaspberry(bufferDatos);
+            bufferDatos = ""; // Limpiar el buffer
+            esperandoInicio = true;
+        }
+    }
+}
+
+void reenviarHoraAlNodo(uint16_t nodo) {
+    String horaActual = obtenerHoraDesdeRaspberry();
+
+    if (horaActual != "") {
+        String mensaje = "HORA:" + horaActual;
+        char buffer[32];
+        mensaje.toCharArray(buffer, sizeof(buffer));
+
+        if (mesh.write(&buffer, 'H', sizeof(buffer), nodo)) {
+            Serial.print("[INFO] Hora enviada al nodo: ");
+            Serial.println(mensaje);
+        } else {
+            Serial.println("[ERROR] Fallo al enviar la hora al nodo.");
+        }
+    } else {
+        Serial.println("[WARNING] No se pudo obtener la hora de la Raspberry Pi.");
+    }
+}
+
+String obtenerHoraDesdeRaspberry() {
+    Serial2.println("SOLICITAR_HORA");
+    unsigned long tiempoInicio = millis();
+
+    while (millis() - tiempoInicio < 1000) { // Esperar hasta 1 segundo por respuesta
+        if (Serial2.available() > 0) {
+            String respuesta = Serial2.readStringUntil('\n');
+            if (respuesta.startsWith("HORA:")) {
+                return respuesta.substring(5); // Extraer hora después de "HORA:"
+            } else {
+                Serial.println("[WARNING] Respuesta de la Raspberry Pi no válida.");
+                return "";
+            }
+        }
+    }
+
+    Serial.println("[ERROR] No se recibió respuesta de la Raspberry Pi.");
+    return "";
+}
+
+void enviarDatosARaspberry(String datos) {
+    Serial2.println(datos); // Enviar los datos completos a la Raspberry Pi
+    Serial.print("[INFO] Datos enviados a Raspberry Pi: ");
+    Serial.println(datos);
+}
+
