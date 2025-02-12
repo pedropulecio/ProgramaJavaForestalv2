@@ -1,0 +1,75 @@
+USE `monitoreoforestal` ;
+
+-- -----------------------------------------------------
+-- Tabla `usuario`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `monitoreoforestal`.`usuario` (
+  `idUsuario` INT NOT NULL AUTO_INCREMENT,
+  `nombre` VARCHAR(255) NOT NULL,
+  `password` VARCHAR(255) NOT NULL,
+  PRIMARY KEY (`idUsuario`)
+) ENGINE = InnoDB
+AUTO_INCREMENT = 2
+DEFAULT CHARACTER SET = utf8mb4
+COLLATE = utf8mb4_0900_ai_ci;
+
+-- -----------------------------------------------------
+-- Tabla `audioforestal`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `monitoreoforestal`.`audioforestal` (
+  `idAudioForestal` INT NOT NULL AUTO_INCREMENT,
+  `idUsuario` INT NOT NULL,
+  `rutaAudio` VARCHAR(255) NULL DEFAULT NULL,
+  PRIMARY KEY (`idAudioForestal`),
+  INDEX `idUsuario` (`idUsuario` ASC) VISIBLE,
+  CONSTRAINT `audioforestal_ibfk_1`
+    FOREIGN KEY (`idUsuario`)
+    REFERENCES `monitoreoforestal`.`usuario` (`idUsuario`)
+) ENGINE = InnoDB
+AUTO_INCREMENT = 2383
+DEFAULT CHARACTER SET = utf8mb4
+COLLATE = utf8mb4_0900_ai_ci;
+
+-- -----------------------------------------------------
+-- Tabla `nodo`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `monitoreoforestal`.`nodo` (
+  `idNodo` INT NOT NULL AUTO_INCREMENT,
+  `nombreNodo` VARCHAR(255) NULL DEFAULT NULL,
+  `idUsuario` INT NULL DEFAULT NULL,
+  PRIMARY KEY (`idNodo`),
+  INDEX `fk_usuario_nodo` (`idUsuario` ASC) VISIBLE,
+  CONSTRAINT `fk_usuario_nodo`
+    FOREIGN KEY (`idUsuario`)
+    REFERENCES `monitoreoforestal`.`usuario` (`idUsuario`)
+) ENGINE = InnoDB
+AUTO_INCREMENT = 8
+DEFAULT CHARACTER SET = utf8mb4
+COLLATE = utf8mb4_0900_ai_ci;
+
+-- -----------------------------------------------------
+-- Tabla `registro`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `monitoreoforestal`.`registro` (
+  `idRegistro` INT NOT NULL AUTO_INCREMENT,
+  `idNodo` INT NULL DEFAULT NULL,
+  `fecha` DATE NULL DEFAULT NULL,
+  `hora` TIME NULL DEFAULT NULL,
+  `temperatura` FLOAT NULL DEFAULT NULL,
+  `humedad` FLOAT NULL DEFAULT NULL,
+  `luminosidad` INT NULL DEFAULT NULL,
+  `lluvia` INT NULL DEFAULT NULL,
+  PRIMARY KEY (`idRegistro`),
+  INDEX `idNodo` (`idNodo` ASC) VISIBLE,
+  CONSTRAINT `registro_ibfk_1`
+    FOREIGN KEY (`idNodo`)
+    REFERENCES `monitoreoforestal`.`nodo` (`idNodo`)
+) ENGINE = InnoDB
+AUTO_INCREMENT = 143
+DEFAULT CHARACTER SET = utf8mb4
+COLLATE = utf8mb4_0900_ai_ci;
+
+-- Crear usuario 'monitor' con todos los privilegios
+CREATE USER 'monitor'@'%' IDENTIFIED BY 'TuContraseñaSegura';
+GRANT ALL PRIVILEGES ON monitoreoForestal.* TO 'monitor'@'%';
+FLUSH PRIVILEGES;
